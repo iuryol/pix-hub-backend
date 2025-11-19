@@ -1,15 +1,15 @@
 # PIX Hub - Gateway de Pagamentos
 
-Módulo Laravel para integração com subadquirentes de pagamento (PIX e Saques).
+Modulo Laravel para integracao com subadquirentes de pagamento (PIX e Saques).
 
 ## Requisitos
 
 - Docker e Docker Compose
 - Git
 
-## Instalação
+## Instalacao
 
-### 1. Clone o repositório
+### 1. Clone o repositorio
 
 ```bash
 git clone <repository-url>
@@ -22,12 +22,13 @@ cd pix-hub
 docker compose up -d
 ```
 
-Isso irá criar:
+Isso ira criar:
 - **app**: PHP 8.2-FPM com Laravel
 - **mysql**: MySQL 8.0
 - **nginx**: Servidor web na porta 8080
+- **worker**: Queue worker com Supervisor (8 processos)
 
-### 3. Instale as dependências
+### 3. Instale as dependencias
 
 ```bash
 docker compose exec app composer install
@@ -46,16 +47,27 @@ docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate --seed
 ```
 
-Isso criará:
+Isso criara:
 - Tabelas do banco de dados
 - Subadquirentes de exemplo (SubadqA e SubadqB)
-- Usuários de teste
+- Usuarios de teste
 
-### 6. Gere um token de teste
+### 6. Gere a documentacao Swagger
 
 ```bash
-docker compose exec app php artisan app:create-test-token
+docker compose exec app php artisan l5-swagger:generate
 ```
+
+## Documentacao da API
+
+A documentacao Swagger esta disponivel em: `http://localhost:8080/api/documentation`
+
+A URL raiz (`http://localhost:8080/`) redireciona automaticamente para a documentacao.
+
+### Usuarios de Teste
+
+- **user-a@example.com** / password (SubadqA)
+- **user-b@example.com** / password (SubadqB)
 
 ## Executando os Testes
 
@@ -65,20 +77,20 @@ docker compose exec app php artisan app:create-test-token
 docker compose exec app php artisan test
 ```
 
-### Testes específicos
+### Testes especificos
 
 ```bash
-# Apenas testes unitários
+# Apenas testes unitarios
 docker compose exec app php artisan test --testsuite=Unit
 
 # Apenas testes de feature
 docker compose exec app php artisan test --testsuite=Feature
 
-# Teste específico
+# Teste especifico
 docker compose exec app php artisan test --filter=PixControllerTest
 ```
 
-### Com cobertura de código
+### Com cobertura de codigo
 
 ```bash
 docker compose exec app php artisan test --coverage
@@ -91,43 +103,77 @@ src/
 ├── app/
 │   ├── Contracts/PaymentGateway/    # Interfaces
 │   ├── DTOs/                        # Data Transfer Objects
+│   │   ├── WebhookData.php          # DTO tipado para webhooks
+│   │   ├── PixRequestDTO.php
+│   │   └── ...
 │   ├── Enums/                       # Enums de status
 │   ├── Events/                      # Eventos do sistema
-│   ├── Exceptions/                  # Exceções customizadas
+│   ├── Exceptions/                  # Excecoes customizadas
+│   │   ├── Gateway/                 # Excecoes especificas de gateway
+│   │   │   ├── GatewayConnectionException.php
+│   │   │   ├── GatewayTimeoutException.php
+│   │   │   ├── GatewayAuthenticationException.php
+│   │   │   ├── GatewayRateLimitException.php
+│   │   │   ├── GatewayValidationException.php
+│   │   │   └── InvalidWebhookPayloadException.php
+│   │   └── GatewayException.php
 │   ├── Http/
 │   │   ├── Controllers/Api/         # Controllers da API
 │   │   ├── Middleware/              # Middlewares
 │   │   ├── Requests/                # Form Requests
 │   │   └── Resources/               # API Resources
-│   ├── Jobs/                        # Jobs assíncronos
+│   ├── Jobs/                        # Jobs assincronos
 │   ├── Models/                      # Eloquent Models
 │   └── Services/
-│       ├── PaymentGateway/          # Implementações dos gateways
-│       ├── PixService.php           # Lógica de negócio PIX
-│       └── WithdrawService.php      # Lógica de negócio Saque
+│       ├── PaymentGateway/          # Implementacoes dos gateways
+│       │   ├── Gateways/
+│       │   │   ├── AbstractGateway.php
+│       │   │   ├── SubadqAGateway.php
+│       │   │   └── SubadqBGateway.php
+│       │   ├── MockGateway.php
+│       │   └── PaymentGatewayFactory.php
+│       ├── PixService.php           # Logica de negocio PIX
+│       └── WithdrawService.php      # Logica de negocio Saque
 ├── database/
 │   ├── migrations/                  # Migrations
 │   └── seeders/                     # Seeders
 ├── routes/
 │   └── api.php                      # Rotas da API
 └── tests/
-    ├── Feature/Api/                 # Testes de integração
-    └── Unit/                        # Testes unitários
+    ├── Feature/Api/                 # Testes de integracao
+    └── Unit/                        # Testes unitarios
 ```
 
 ## API Endpoints
 
 Base URL: `http://localhost:8080/api`
 
-### Autenticação
+### Autenticacao
 
-Todas as rotas (exceto `/health`) requerem autenticação via Bearer Token.
+```bash
+# Gerar token
+POST /auth/token
+Content-Type: application/json
+{
+    "email": "user-a@example.com",
+    "password": "password"
+}
+```
 
+**Resposta:**
+```json
+{
+    "token": "1|abc123xyz...",
+    "token_type": "Bearer"
+}
+```
+
+Todas as rotas protegidas requerem autenticacao via Bearer Token:
 ```bash
 Authorization: Bearer <token>
 ```
 
-### Rotas Disponíveis
+### Rotas Disponiveis
 
 #### Health Check
 ```
@@ -145,7 +191,7 @@ Content-Type: application/json
     "description": "Pagamento teste"
 }
 
-# Listar PIX do usuário
+# Listar PIX do usuario
 GET /pix
 
 # Detalhes de um PIX
@@ -164,7 +210,7 @@ Content-Type: application/json
     "pix_key_type": "cpf"
 }
 
-# Criar Saque (via dados bancários)
+# Criar Saque (via dados bancarios)
 POST /withdraw
 Content-Type: application/json
 {
@@ -175,14 +221,34 @@ Content-Type: application/json
     "account_type": "checking"
 }
 
-# Listar Saques do usuário
+# Listar Saques do usuario
 GET /withdraw
 
 # Detalhes de um Saque
 GET /withdraw/{id}
 ```
 
+## Rate Limiting
+
+A API possui limites de requisicoes por endpoint:
+
+| Endpoint | Limite |
+|----------|--------|
+| POST /auth/token | 5 req/min |
+| POST /pix | 60 req/min |
+| POST /withdraw | 30 req/min |
+
+Quando o limite e excedido, a API retorna status 429 (Too Many Requests).
+
 ## Exemplos de Uso
+
+### Obter Token
+
+```bash
+curl -X POST http://localhost:8080/api/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user-a@example.com", "password": "password"}'
+```
 
 ### Criar um PIX
 
@@ -196,7 +262,6 @@ curl -X POST http://localhost:8080/api/pix \
 **Resposta:**
 ```json
 {
-    "success": true,
     "message": "PIX criado com sucesso.",
     "data": {
         "id": 1,
@@ -223,7 +288,6 @@ curl -X POST http://localhost:8080/api/withdraw \
 **Resposta:**
 ```json
 {
-    "success": true,
     "message": "Saque criado com sucesso.",
     "data": {
         "id": 1,
@@ -239,24 +303,71 @@ curl -X POST http://localhost:8080/api/withdraw \
 
 ## Arquitetura
 
-### Padrões Utilizados
+### Padroes Utilizados
 
-- **Strategy Pattern**: Diferentes implementações de gateway (SubadqA, SubadqB)
+- **Strategy Pattern**: Diferentes implementacoes de gateway (SubadqA, SubadqB, Mock)
 - **Factory Pattern**: `PaymentGatewayFactory` para instanciar gateways
-- **Repository/Service Layer**: Separação de lógica de negócio
-- **DTOs**: Transferência de dados tipados entre camadas
+- **Repository/Service Layer**: Separacao de logica de negocio
+- **DTOs**: Transferencia de dados tipados entre camadas
+- **Exception Handling**: Excecoes especificas por tipo de erro
+
+### Sistema de Excecoes
+
+O sistema possui excecoes tipadas para cada cenario de erro:
+
+| Excecao | Descricao | HTTP Status |
+|---------|-----------|-------------|
+| GatewayConnectionException | Falha de conexao com gateway | - |
+| GatewayTimeoutException | Timeout na requisicao | - |
+| GatewayAuthenticationException | Credenciais invalidas | 401 |
+| GatewayValidationException | Erro de validacao | 422 |
+| GatewayRateLimitException | Rate limit excedido | 429 |
+| InvalidWebhookPayloadException | Payload de webhook invalido | - |
+
+### WebhookData DTO
+
+O processamento de webhooks utiliza um DTO tipado:
+
+```php
+readonly class WebhookData
+{
+    public function __construct(
+        public string $externalId,
+        public string $status,
+        public ?float $amount = null,
+        public ?Carbon $paidAt = null,
+        public ?Carbon $completedAt = null,
+        public ?string $failureReason = null,
+        public array $rawPayload = [],
+    ) {}
+
+    // Metodos auxiliares
+    public function isPaid(): bool;
+    public function isFailed(): bool;
+    public function isPending(): bool;
+}
+```
 
 ### Fluxo de Processamento
 
-1. **Request** → Controller valida e chama Service
-2. **Service** → Cria registro no DB e chama Gateway
-3. **Gateway** → Faz requisição HTTP para API externa
-4. **Job** → Simula webhook de confirmação (2-5s delay)
-5. **Event** → Dispara evento de confirmação
+1. **Request** - Controller valida e chama Service
+2. **Service** - Cria registro no DB e chama Gateway
+3. **Gateway** - Faz requisicao HTTP para API externa
+4. **Job** - Simula webhook de confirmacao (2-5s delay)
+5. **Event** - Dispara evento de confirmacao
+
+### Tratamento de Erros nos Jobs
+
+Os jobs de webhook possuem tratamento especifico por tipo de erro:
+
+- **GatewayRateLimitException**: Release com delay dinamico
+- **GatewayTimeoutException**: Retry com backoff
+- **GatewayConnectionException**: Retry com backoff
+- **InvalidWebhookPayloadException**: Marca como failed (sem retry)
 
 ### Adicionando Novo Gateway
 
-1. Crie a classe em `app/Services/PaymentGateway/`:
+1. Crie a classe em `app/Services/PaymentGateway/Gateways/`:
 
 ```php
 class NewGateway extends AbstractGateway
@@ -268,10 +379,28 @@ class NewGateway extends AbstractGateway
 
     public function createPix(PixRequestDTO $request): PixResponseDTO
     {
-        // Implementação
+        // Implementacao
     }
 
-    // ... outros métodos
+    public function processPixWebhook(array $payload): WebhookData
+    {
+        // Validar campos obrigatorios
+        if (empty($payload['id'])) {
+            throw new InvalidWebhookPayloadException(
+                gateway: $this->getIdentifier(),
+                reason: 'Missing required field: id',
+                payload: $payload,
+            );
+        }
+
+        return new WebhookData(
+            externalId: $payload['id'],
+            status: $payload['status'],
+            // ...
+        );
+    }
+
+    // ... outros metodos
 }
 ```
 
@@ -288,12 +417,30 @@ return match ($subacquirer->slug) {
 
 3. Crie o seeder para o novo subadquirer.
 
+## Queue Workers
+
+O sistema utiliza Supervisor para gerenciar os workers de fila:
+
+```bash
+# Verificar status dos workers
+docker compose exec worker supervisorctl status
+
+# Ver logs dos workers
+docker compose exec app tail -f storage/logs/worker.log
+
+# Reiniciar workers
+docker compose exec worker supervisorctl restart all
+```
+
+Configuracao atual: 8 processos paralelos para processar webhooks.
+
 ## Logs
 
-Os logs são separados por canal:
+Os logs sao separados por canal:
 
-- **gateway**: Requisições/respostas dos gateways
-- **api**: Requisições da API
+- **gateway**: Requisicoes/respostas dos gateways
+- **api**: Requisicoes da API
+- **worker**: Processamento de jobs
 
 ```bash
 # Ver logs do gateway
@@ -301,18 +448,21 @@ docker compose exec app tail -f storage/logs/gateway.log
 
 # Ver logs da API
 docker compose exec app tail -f storage/logs/api.log
+
+# Ver logs do worker
+docker compose exec app tail -f storage/logs/worker.log
 ```
 
 ## Troubleshooting
 
-### Container não inicia
+### Container nao inicia
 
 ```bash
 docker compose down
 docker compose up -d --build
 ```
 
-### Erro de permissão
+### Erro de permissao
 
 ```bash
 docker compose exec app chmod -R 775 storage bootstrap/cache
@@ -333,11 +483,27 @@ docker compose exec app php artisan route:clear
 docker compose exec app php artisan migrate:fresh --seed
 ```
 
+### Erro 429 do gateway externo
+
+Se o mock da Postman retornar 429, use o MockGateway local:
+
+```bash
+docker compose exec app php artisan tinker --execute="App\Models\Subacquirer::where('slug', 'subadq-a')->update(['base_url' => 'mock://local']);"
+```
+
+### Regenerar documentacao Swagger
+
+```bash
+docker compose exec app php artisan l5-swagger:generate
+```
+
 ## Tecnologias
 
 - PHP 8.2
 - Laravel 11
 - MySQL 8.0
 - Docker & Docker Compose
+- Supervisor (queue workers)
 - PHPUnit
-- Laravel Sanctum (autenticação)
+- Laravel Sanctum (autenticacao)
+- L5-Swagger (documentacao OpenAPI)
