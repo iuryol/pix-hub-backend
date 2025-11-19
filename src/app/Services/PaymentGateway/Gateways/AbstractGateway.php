@@ -61,6 +61,7 @@ abstract class AbstractGateway implements PaymentGatewayInterface
         try {
             $response = Http::withHeaders($allHeaders)
                 ->timeout($this->timeout)
+                ->retry(3,100)
                 ->{strtolower($method)}($url, $data);
 
             $responseData = $response->json() ?? [];
